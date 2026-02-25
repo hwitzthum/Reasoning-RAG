@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+{% block title %}Admin Documents{% endblock %}
+{% block content %}
+<section class="query-layout">
+    <header class="card masthead">
+        <p class="eyebrow">Admin / Documents</p>
+        <h1>Document Management</h1>
+        <p class="subhead">Browse, filter, upload, and inspect unresolved cross-references.</p>
+    </header>
+
+    <section class="card">
+        <h2>Filters</h2>
+        <form method="get" action="/admin/documents" class="query-form filters-grid">
+            <label for="q">Search title/summary</label>
+            <input id="q" name="q" type="text" value="{{ q }}">
+            <label for="language">Language</label>
+            <select id="language" name="language">
+                <option value="">All</option>
+                <option value="en" {% if language == "en" %}selected{% endif %}>EN</option>
+                <option value="de" {% if language == "de" %}selected{% endif %}>DE</option>
+                <option value="fr" {% if language == "fr" %}selected{% endif %}>FR</option>
+                <option value="it" {% if language == "it" %}selected{% endif %}>IT</option>
+            </select>
+            <button type="submit">Apply</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <h2>Upload</h2>
+        <form id="upload-form" action="/api/documents/upload" method="post" enctype="multipart/form-data" class="query-form">
+            <input id="file" name="file" type="file" accept=".pdf,.docx,.pptx" hidden>
+            <div id="upload-dropzone" class="upload-dropzone" tabindex="0" role="button" aria-label="Upload document dropzone">
+                <p><strong>Drag and drop</strong> a PDF, DOCX, or PPTX file here.</p>
+                <p>or click to browse local files.</p>
+                <p id="upload-file-name" class="subhead">No file selected.</p>
+            </div>
+            <div class="inline-actions">
+                <button type="submit">Upload</button>
+                <span id="upload-status" class="feedback-status" aria-live="polite"></span>
+            </div>
+        </form>
+    </section>
+
+    <section class="card">
+        <h2>Documents</h2>
+        {% if documents %}
+        <table class="admin-table">
+            <thead>
+                <tr>
+                    <th>Doc ID</th>
+                    <th>Title</th>
+                    <th>Language</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Unresolved XRefs</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for doc in documents %}
+                <tr>
+                    <td>{{ doc.doc_id }}</td>
+                    <td>{{ doc.title }}</td>
+                    <td>{{ doc.language }}</td>
+                    <td>{{ doc.file_type }}</td>
+                    <td>{{ ingestion_status_by_doc.get(doc.doc_id, "completed") }}</td>
+                    <td>{{ unresolved_by_doc.get(doc.doc_id, 0) }}</td>
+                    <td class="table-actions">
+                        <a href="/api/documents/{{ doc.doc_id }}">View</a>
+                        <button
+                            type="button"
+                            class="ghost doc-delete-btn"
+                            data-doc-id="{{ doc.doc_id }}"
+                            data-doc-title="{{ doc.title or doc.doc_id }}"
+                            onclick="openDeleteModalFromButton(this)"
+                        >
+                            Delete
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No documents available.</p>
+        {% endif %}
+    </section>
+</section>
+
+<div id="delete-modal" class="modal-overlay" hidden>
+    <div class="modal-card">
+        <h2>Delete Document</h2>
+        <p id="delete-modal-text">Are you sure?</p>
+        <p class="subhead">Selected doc: <code id="delete-modal-doc-id">none</code></p>
+        <div class="inline-actions">
+            <button id="delete-confirm" type="button" onclick="submitDelete()">Delete Permanently</button>
+            <button id="delete-cancel" type="button" class="ghost" onclick="closeDeleteModal()">Cancel</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+var currentDeleteDocId = "";
+
+function openDeleteModal(docId, docTitle) {
+    var modal = document.getElementById("delete-modal");
+    var text = document.getElementById("delete-modal-text");
+    var badge = document.getElementById("delete-modal-doc-id");
+    var confirmBtn = document.getElementById("delete-confirm");
+
+    currentDeleteDocId = String(docId || "").trim();
+    badge.textContent = currentDeleteDocId || "none";
+    text.textContent = "Delete document " + (docTitle || currentDeleteDocId || "unknown") + "? This action cannot be undone.";
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = "Delete Permanently";
+    modal.hidden = false;
+}
+
+function openDeleteModalFromButton(buttonEl) {
+    var docId = "";
+    var docTitle = "";
+    if (buttonEl) {
+        docId = (buttonEl.getAttribute("data-doc-id") || "").trim();
+        docTitle = (buttonEl.getAttribute("data-doc-title") || "").trim();
+
+        // Fallback: read first cell (Doc ID) from the same table row.
+        if (!docId) {
+            var row = buttonEl.closest("tr");
+            var cell = row ? row.querySelector("td") : null;
+            docId = cell ? String(cell.textContent || "").trim() : "";
+        }
+    }
+    openDeleteModal(docId, docTitle || docId);
+}
+
+function closeDeleteModal() {
+    var modal = document.getElementById("delete-modal");
+    var confirmBtn = document.getElementById("delete-confirm");
+    modal.hidden = true;
+    currentDeleteDocId = "";
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = "Delete Permanently";
+}
+
+function submitDelete() {
+    var text = document.getElementById("delete-modal-text");
+    var confirmBtn = document.getElementById("delete-confirm");
+
+    if (!currentDeleteDocId) {
+        text.textContent = "Delete failed: missing document id.";
+        return;
+    }
+
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Deleting...";
+
+    var xhr = new XMLHttpRequest();
+    xhr.open("DELETE", "/api/documents/" + encodeURIComponent(currentDeleteDocId), true);
+    xhr.timeout = 12000;
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) return;
+        if (xhr.status >= 200 && xhr.status < 300) {
+            window.location.reload();
+            return;
+        }
+
+        var message = "Delete failed";
+        try {
+            var payload = JSON.parse(xhr.responseText || "{}");
+            if (payload.detail) message = "Delete failed: " + payload.detail;
+        } catch (_err) {}
+
+        text.textContent = message;
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "Delete Permanently";
+    };
+    xhr.onerror = function () {
+        text.textContent = "Delete failed: network error";
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "Delete Permanently";
+    };
+    xhr.ontimeout = function () {
+        text.textContent = "Delete request timed out. Check server logs and try again.";
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "Delete Permanently";
+    };
+    xhr.send();
+}
+
+document.getElementById("delete-modal").addEventListener("click", function (event) {
+    if (event.target === this) closeDeleteModal();
+});
+</script>
+
+<script>
+(function setupUploadUX() {
+    var fileInput = document.getElementById("file");
+    var uploadForm = document.getElementById("upload-form");
+    var dropzone = document.getElementById("upload-dropzone");
+    var fileName = document.getElementById("upload-file-name");
+    var uploadStatus = document.getElementById("upload-status");
+
+    function setFileLabel() {
+        var file = fileInput.files && fileInput.files[0];
+        fileName.textContent = file ? "Selected: " + file.name : "No file selected.";
+    }
+
+    function attachFile(files) {
+        if (!files || files.length === 0) return;
+        try {
+            var transfer = new DataTransfer();
+            Array.prototype.forEach.call(files, function (file) {
+                transfer.items.add(file);
+            });
+            fileInput.files = transfer.files;
+            setFileLabel();
+        } catch (_error) {
+            uploadStatus.textContent = "Browser blocked drag-and-drop assignment. Use click-to-upload.";
+        }
+    }
+
+    dropzone.addEventListener("click", function () { fileInput.click(); });
+    dropzone.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            fileInput.click();
+        }
+    });
+
+    ["dragenter", "dragover"].forEach(function (eventName) {
+        dropzone.addEventListener(eventName, function (event) {
+            event.preventDefault();
+            dropzone.classList.add("is-dragover");
+        });
+    });
+
+    ["dragleave", "drop"].forEach(function (eventName) {
+        dropzone.addEventListener(eventName, function (event) {
+            event.preventDefault();
+            dropzone.classList.remove("is-dragover");
+        });
+    });
+
+    dropzone.addEventListener("drop", function (event) {
+        attachFile(event.dataTransfer.files);
+    });
+
+    fileInput.addEventListener("change", setFileLabel);
+
+    uploadForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        var file = fileInput.files && fileInput.files[0];
+        if (!file) {
+            uploadStatus.textContent = "Select a file before upload.";
+            return;
+        }
+
+        uploadStatus.textContent = "Uploading and ingesting...";
+        var formData = new FormData();
+        formData.append("file", file);
+        var controller = new AbortController();
+        var timeoutHandle = setTimeout(function () {
+            controller.abort();
+        }, 180000);
+
+        try {
+            var response = await fetch(uploadForm.action, {
+                method: "POST",
+                body: formData,
+                signal: controller.signal,
+            });
+            if (!response.ok) {
+                var payload = await response.json().catch(function () { return {}; });
+                throw new Error(payload.detail || "Upload failed");
+            }
+            uploadStatus.textContent = "Upload complete. Refreshing...";
+            window.location.reload();
+        } catch (error) {
+            if (error && error.name === "AbortError") {
+                uploadStatus.textContent = "Upload timed out after 3 minutes. Please retry with a smaller document.";
+            } else {
+                uploadStatus.textContent = "Upload failed: " + (error.message || "Unknown error");
+            }
+        } finally {
+            clearTimeout(timeoutHandle);
+        }
+    });
+})();
+</script>
+{% endblock %}

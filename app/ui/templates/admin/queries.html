@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Admin Queries{% endblock %}
+{% block content %}
+<section class="query-layout">
+    <header class="card masthead">
+        <p class="eyebrow">Admin / Queries</p>
+        <h1>Query Log Viewer</h1>
+        <p class="subhead">Inspect query history with confidence, cache, and date-range filters.</p>
+    </header>
+
+    <section class="card">
+        <h2>Filters</h2>
+        <form class="query-form filters-grid" method="get" action="/admin/queries">
+            <label for="date_from">Date From</label>
+            <input id="date_from" name="date_from" type="date" value="{{ date_from }}">
+            <label for="date_to">Date To</label>
+            <input id="date_to" name="date_to" type="date" value="{{ date_to }}">
+
+            <label for="confidence">Confidence</label>
+            <select id="confidence" name="confidence">
+                <option value="">All</option>
+                <option value="high" {% if confidence == "high" %}selected{% endif %}>High</option>
+                <option value="medium" {% if confidence == "medium" %}selected{% endif %}>Medium</option>
+                <option value="low" {% if confidence == "low" %}selected{% endif %}>Low</option>
+            </select>
+
+            <label for="cache_hit">Cache Hit</label>
+            <select id="cache_hit" name="cache_hit">
+                <option value="">All</option>
+                <option value="true" {% if cache_hit == "true" %}selected{% endif %}>True</option>
+                <option value="false" {% if cache_hit == "false" %}selected{% endif %}>False</option>
+            </select>
+
+            <div class="inline-actions">
+                <button type="submit">Apply</button>
+                <button type="submit" name="export" value="csv" class="ghost">Export CSV</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card">
+        <h2>Recent Queries</h2>
+        {% if entries %}
+        <table class="admin-table">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Query</th>
+                    <th>Latency</th>
+                    <th>Cache Hit</th>
+                    <th>Confidence</th>
+                    <th>Iterations</th>
+                    <th>Trace</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in entries %}
+                <tr>
+                    <td>{{ e.created_at }}</td>
+                    <td>
+                        <details>
+                            <summary>{{ e.query_text[:80] }}{% if e.query_text|length > 80 %}...{% endif %}</summary>
+                            <pre>{{ e.query_text }}</pre>
+                            {% if e.sections_explored %}
+                            <p><strong>Sections explored:</strong> {{ e.sections_explored | join(", ") }}</p>
+                            {% else %}
+                            <p><strong>Sections explored:</strong> none recorded</p>
+                            {% endif %}
+                        </details>
+                    </td>
+                    <td>{{ e.latency_ms }}</td>
+                    <td>{{ e.cache_hit }}</td>
+                    <td>{{ e.confidence }}</td>
+                    <td>{{ e.iterations }}</td>
+                    <td><a href="/admin/trace/{{ e.query_id }}">Open</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No query logs found.</p>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}

@@ -1,0 +1,566 @@
+{% extends "base.html" %}
+
+{% block title %}Reasoning RAG Query{% endblock %}
+
+{% block content %}
+<section class="query-layout">
+    <header class="masthead card">
+        <h1>Cross-Document Reasoning Console</h1>
+        <p class="subhead">
+            Ask a policy question, watch reasoning progress live, then inspect evidence and citations.
+        </p>
+    </header>
+
+    <section class="card query-card">
+        <form
+            id="query-form"
+            class="query-form"
+        >
+            <label for="question-input">Question</label>
+            <textarea id="question-input" name="question" rows="3" required></textarea>
+
+            <label for="doc-scope">Document Scope (optional)</label>
+            <select id="doc-scope" name="doc_ids" multiple>
+                {% for doc in documents %}
+                <option value="{{ doc.doc_id }}">{{ doc.title }} ({{ doc.doc_id }})</option>
+                {% endfor %}
+            </select>
+
+            <div class="actions">
+                <button type="submit">Run Query</button>
+            </div>
+        </form>
+
+        <div id="query-status" class="status-block">Ready.</div>
+        <ul id="progress-list" class="progress-list"></ul>
+    </section>
+
+    <section class="card answer-card">
+        <div class="panel-heading">
+            <h2>Answer</h2>
+            <p id="answer-meta">No result yet.</p>
+        </div>
+        <article id="answer-text" class="answer-text"></article>
+        <h3>Citations</h3>
+        <ul id="citation-list" class="citation-list"></ul>
+        <div id="feedback-slot"></div>
+    </section>
+
+    <aside id="citation-panel" class="card citation-panel" hidden>
+        <div class="panel-heading">
+            <h2>Citation Detail</h2>
+            <button type="button" class="ghost" data-close-panel>Close</button>
+        </div>
+        <div id="citation-panel-content" class="citation-panel-content">
+            Select a citation with a paragraph reference to inspect source context.
+        </div>
+    </aside>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+    const VIEW_STATE_KEY = "rrag-last-query-state-v1";
+    const form = document.getElementById("query-form");
+    const questionInput = document.getElementById("question-input");
+    const docScope = document.getElementById("doc-scope");
+    const statusBlock = document.getElementById("query-status");
+    const progressList = document.getElementById("progress-list");
+    const answerText = document.getElementById("answer-text");
+    const answerMeta = document.getElementById("answer-meta");
+    const citationList = document.getElementById("citation-list");
+    const feedbackSlot = document.getElementById("feedback-slot");
+    const panel = document.getElementById("citation-panel");
+    const panelContent = document.getElementById("citation-panel-content");
+
+    let stream = null;
+    let latestCitations = [];
+    let activeQuestion = "";
+
+    const escapeHtml = (value) =>
+        String(value)
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll("\"", "&quot;")
+            .replaceAll("'", "&#39;");
+
+    const sanitizeHref = (href) => {
+        const raw = String(href || "").trim();
+        if (!raw) {
+            return null;
+        }
+
+        if (raw.startsWith("/") || raw.startsWith("#")) {
+            return raw;
+        }
+
+        try {
+            const parsed = new URL(raw, window.location.origin);
+            if (["http:", "https:", "mailto:"].includes(parsed.protocol)) {
+                return parsed.href;
+            }
+        } catch (_err) {
+            return null;
+        }
+        return null;
+    };
+
+    const renderInlineMarkdown = (line) => {
+        let html = escapeHtml(line);
+        html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+        html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+        html = html.replace(/(^|[^\*])\*([^*]+)\*/g, "$1<em>$2</em>");
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label, href) => {
+            const safeHref = sanitizeHref(href);
+            if (!safeHref) {
+                return label;
+            }
+            return `<a href="${escapeHtml(safeHref)}" target="_blank" rel="noreferrer noopener">${label}</a>`;
+        });
+        return html;
+    };
+
+    const resolveCitationParaId = (citation) =>
+        citation?.para_id || citation?.verified_para_id || "";
+
+    const openCitationPanel = async (paraId) => {
+        if (!paraId) {
+            return;
+        }
+        const resp = await fetch(`/ui/citation/${encodeURIComponent(paraId)}`);
+        if (resp.ok) {
+            panelContent.innerHTML = await resp.text();
+            panel.hidden = false;
+            panel.classList.add("is-open");
+        }
+    };
+
+    const matchCitationByLabel = (citations, citationLabel) => {
+        if (!Array.isArray(citations) || !citationLabel) {
+            return null;
+        }
+        const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+        const normalized = normalize(citationLabel);
+        return citations.find((citation) => {
+            const title = String(citation?.doc_title || "Document").trim();
+            const section = String(citation?.section || "").trim();
+            const sectionLabel = String(citation?.section_label || "").trim();
+            const page = citation?.page;
+
+            const candidates = [];
+            if (sectionLabel) {
+                candidates.push(`${title}, ${sectionLabel}`);
+            }
+            if (section && page !== undefined && page !== null && page !== "") {
+                candidates.push(`${title}, Section ${section}, p.${page}`);
+                candidates.push(`${title}, Abschnitt ${section}, S.${page}`);
+            }
+            if (section) {
+                candidates.push(`${title}, Section ${section}`);
+                candidates.push(`${title}, Abschnitt ${section}`);
+            }
+
+            return candidates.some((candidate) => normalize(candidate) === normalized);
+        }) || null;
+    };
+
+    const renderInlineCitation = (_ordinal, citationLabel, citation) => {
+        const paraId = resolveCitationParaId(citation);
+        const safeLabel = escapeHtml(`[${citationLabel}]`);
+        if (!paraId) {
+            return `<span class="inline-citation is-disabled">${safeLabel}</span>`;
+        }
+        const href = `/ui/source/${encodeURIComponent(paraId)}`;
+        return `<a class="inline-citation-link" href="${href}" title="Open source passage">${safeLabel}</a>`;
+    };
+
+    const renderAnswerMarkdown = (sourceText, citations = []) => {
+        const rawText = String(sourceText || "").replace(/\r\n/g, "\n");
+        const text = rawText.trim();
+        if (!text) {
+            return "";
+        }
+
+        const tokenizedCitations = [];
+        const textWithTokens = rawText.replace(/\[([^[\]]+)\](?!\()/g, (match, citationBody) => {
+            const body = String(citationBody || "").trim();
+            const paraIdMatch = body.match(/^[A-Za-z0-9_-]+:[A-Za-z0-9_.-]+:p\d+$/);
+            if (paraIdMatch) {
+                const ordinal = tokenizedCitations.length + 1;
+                const citation =
+                    citations[ordinal - 1] ||
+                    citations.find((item) => resolveCitationParaId(item) === body) ||
+                    null;
+                if (!citation) {
+                    return match;
+                }
+                tokenizedCitations.push({ordinal, citationBody: body, citation});
+                return `@@CITATION_${ordinal}@@`;
+            }
+            const looksLikeCitation =
+                body.includes(",") &&
+                /(?:section|abschnitt|kapitel|chapter|sec\.?|p\.|page|seite|s\.)/i.test(body);
+            if (!looksLikeCitation) {
+                return match;
+            }
+            const ordinal = tokenizedCitations.length + 1;
+            const citation = citations[ordinal - 1] || matchCitationByLabel(citations, body) || null;
+            if (!citation) {
+                return match;
+            }
+            tokenizedCitations.push({ordinal, citationBody: body, citation});
+            return `@@CITATION_${ordinal}@@`;
+        });
+
+        const normalizedText = textWithTokens.trim();
+        const lines = normalizedText.split("\n");
+        const out = [];
+        let inUl = false;
+        let inOl = false;
+        let paragraph = [];
+
+        const closeLists = () => {
+            if (inUl) {
+                out.push("</ul>");
+                inUl = false;
+            }
+            if (inOl) {
+                out.push("</ol>");
+                inOl = false;
+            }
+        };
+
+        const flushParagraph = () => {
+            if (!paragraph.length) {
+                return;
+            }
+            const joined = paragraph.join(" ");
+            out.push(`<p>${renderInlineMarkdown(joined)}</p>`);
+            paragraph = [];
+        };
+
+        for (const rawLine of lines) {
+            const line = rawLine.trim();
+
+            if (!line) {
+                flushParagraph();
+                closeLists();
+                continue;
+            }
+
+            const headingMatch = line.match(/^(#{1,3})\s+(.+)$/);
+            if (headingMatch) {
+                flushParagraph();
+                closeLists();
+                const level = headingMatch[1].length;
+                out.push(`<h${level}>${renderInlineMarkdown(headingMatch[2])}</h${level}>`);
+                continue;
+            }
+
+            const bulletMatch = line.match(/^[-*]\s+(.+)$/);
+            if (bulletMatch) {
+                flushParagraph();
+                if (inOl) {
+                    out.push("</ol>");
+                    inOl = false;
+                }
+                if (!inUl) {
+                    out.push("<ul>");
+                    inUl = true;
+                }
+                out.push(`<li>${renderInlineMarkdown(bulletMatch[1])}</li>`);
+                continue;
+            }
+
+            const orderedMatch = line.match(/^\d+\.\s+(.+)$/);
+            if (orderedMatch) {
+                flushParagraph();
+                if (inUl) {
+                    out.push("</ul>");
+                    inUl = false;
+                }
+                if (!inOl) {
+                    out.push("<ol>");
+                    inOl = true;
+                }
+                out.push(`<li>${renderInlineMarkdown(orderedMatch[1])}</li>`);
+                continue;
+            }
+
+            if (line.startsWith(">")) {
+                flushParagraph();
+                closeLists();
+                out.push(`<blockquote>${renderInlineMarkdown(line.replace(/^>\s?/, ""))}</blockquote>`);
+                continue;
+            }
+
+            closeLists();
+            paragraph.push(line);
+        }
+
+        flushParagraph();
+        closeLists();
+        let html = out.join("");
+        html = html.replace(/@@CITATION_(\d+)@@/g, (_m, ordinalRaw) => {
+            const ordinal = Number(ordinalRaw);
+            const token = tokenizedCitations.find((item) => item.ordinal === ordinal);
+            if (!token) {
+                return "";
+            }
+            return renderInlineCitation(token.ordinal, token.citationBody, token.citation);
+        });
+        return html;
+    };
+
+    const addProgress = (line) => {
+        const item = document.createElement("li");
+        item.textContent = line;
+        progressList.appendChild(item);
+    };
+
+    const resetView = () => {
+        statusBlock.textContent = "Submitting query...";
+        progressList.innerHTML = "";
+        answerText.textContent = "";
+        answerMeta.textContent = "Awaiting answer...";
+        citationList.innerHTML = "";
+        latestCitations = [];
+        feedbackSlot.innerHTML = "";
+        panelContent.textContent = "Select a citation with a paragraph reference to inspect source context.";
+        panel.classList.remove("is-open");
+        panel.hidden = true;
+    };
+
+    const selectedDocIds = () =>
+        Array.from(docScope.selectedOptions).map((option) => option.value);
+
+    const renderCitations = (citations) => {
+        latestCitations = Array.isArray(citations) ? citations : [];
+        citationList.innerHTML = "";
+        if (latestCitations.length === 0) {
+            const li = document.createElement("li");
+            li.textContent = "No verified citations returned.";
+            citationList.appendChild(li);
+            return;
+        }
+
+        latestCitations.forEach((citation, index) => {
+            const li = document.createElement("li");
+            const paraId = resolveCitationParaId(citation);
+            const label = `${index + 1}. ${citation.doc_title || "Document"} | Section ${citation.section || "?"} | p.${citation.page || "?"}`;
+
+            if (paraId) {
+                const row = document.createElement("div");
+                row.className = "citation-row";
+
+                const link = document.createElement("a");
+                link.textContent = label;
+                link.className = "citation-source-link";
+                link.href = `/ui/source/${encodeURIComponent(paraId)}`;
+                row.appendChild(link);
+
+                const previewBtn = document.createElement("button");
+                previewBtn.type = "button";
+                previewBtn.className = "citation-link";
+                previewBtn.textContent = "Preview";
+                previewBtn.addEventListener("click", async () => openCitationPanel(paraId));
+                row.appendChild(previewBtn);
+                li.appendChild(row);
+            } else {
+                li.textContent = label;
+            }
+            citationList.appendChild(li);
+        });
+    };
+
+    const loadFeedback = async (queryId) => {
+        const resp = await fetch(`/ui/feedback/${encodeURIComponent(queryId)}`);
+        if (resp.ok) {
+            feedbackSlot.innerHTML = await resp.text();
+        }
+    };
+
+    const saveViewState = (state) => {
+        try {
+            localStorage.setItem(VIEW_STATE_KEY, JSON.stringify(state));
+        } catch (_err) {
+            // Ignore storage issues.
+        }
+    };
+
+    const restoreViewState = async () => {
+        let state = null;
+        try {
+            const raw = localStorage.getItem(VIEW_STATE_KEY);
+            state = raw ? JSON.parse(raw) : null;
+        } catch (_err) {
+            state = null;
+        }
+        if (!state || !state.answer) {
+            return;
+        }
+
+        if (state.question) {
+            questionInput.value = state.question;
+            activeQuestion = state.question;
+        }
+        statusBlock.textContent = state.status || "Restored previous query.";
+        answerText.innerHTML = renderAnswerMarkdown(state.answer || "", state.citations || []);
+        answerMeta.textContent = state.answerMeta || "Restored previous query.";
+        renderCitations(state.citations || []);
+        if (state.query_id) {
+            try {
+                await loadFeedback(state.query_id);
+            } catch (_err) {
+                // Feedback restoration is best effort.
+            }
+        }
+    };
+
+    const startStream = (streamUrl) => {
+        if (stream) {
+            stream.close();
+            stream = null;
+        }
+
+        const currentStream = new EventSource(streamUrl);
+        stream = currentStream;
+        let answered = false;
+
+        currentStream.addEventListener("progress", (event) => {
+            if (stream !== currentStream) {
+                return;
+            }
+            const data = JSON.parse(event.data);
+            addProgress(`${data.status || "progress"}: ${data.message || ""}`.trim());
+            statusBlock.textContent = "Processing...";
+        });
+
+        currentStream.addEventListener("answer", async (event) => {
+            if (stream !== currentStream) {
+                return;
+            }
+
+            answered = true;
+            const data = JSON.parse(event.data);
+            statusBlock.textContent = data.cached ? "Completed from cache." : "Completed.";
+            answerText.innerHTML = renderAnswerMarkdown(data.answer || "", data.citations || []);
+            const answerMetaText = `Confidence: ${data.confidence || "n/a"} | Iterations: ${data.iterations || 0}`;
+            answerMeta.textContent = answerMetaText;
+            renderCitations(data.citations || []);
+            saveViewState({
+                question: activeQuestion || questionInput.value.trim(),
+                status: statusBlock.textContent,
+                answer: data.answer || "",
+                citations: data.citations || [],
+                answerMeta: answerMetaText,
+                query_id: data.query_id || null,
+            });
+
+            if (data.query_id) {
+                try {
+                    await loadFeedback(data.query_id);
+                } catch (_err) {
+                    // Feedback loading is optional and must not downgrade query success state.
+                }
+            }
+
+            if (stream === currentStream) {
+                stream = null;
+            }
+            currentStream.close();
+        });
+
+        currentStream.addEventListener("error", (event) => {
+            if (stream !== currentStream) {
+                currentStream.close();
+                return;
+            }
+
+            // Browsers often emit one final error event when SSE closes after completion.
+            if (answered) {
+                if (stream === currentStream) {
+                    stream = null;
+                }
+                currentStream.close();
+                return;
+            }
+
+            let message = null;
+            if (event instanceof MessageEvent && event.data) {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data && data.error) {
+                        message = `Error: ${data.error}`;
+                    }
+                } catch (_err) {
+                    message = null;
+                }
+            }
+
+            if (!message) {
+                // No explicit error payload from server: keep stream open for auto-reconnect.
+                statusBlock.textContent = "Connection interrupted, retrying...";
+                return;
+            }
+
+            statusBlock.textContent = message;
+            addProgress(message);
+            if (stream === currentStream) {
+                stream = null;
+            }
+            currentStream.close();
+        });
+    };
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const question = questionInput.value.trim();
+        if (!question) {
+            statusBlock.textContent = "Question is required.";
+            return;
+        }
+
+        resetView();
+        activeQuestion = question;
+        const payload = {
+            question,
+            doc_ids: selectedDocIds().length ? selectedDocIds() : null,
+        };
+
+        const resp = await fetch("/api/query", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload),
+        });
+
+        if (!resp.ok) {
+            statusBlock.textContent = "Failed to submit query.";
+            return;
+        }
+
+        const data = await resp.json();
+        statusBlock.textContent = `Query submitted: ${data.query_id}`;
+        startStream(data.stream_url);
+    });
+
+    document.addEventListener("click", (event) => {
+        const target = event.target;
+        if (target instanceof Element) {
+            const closeTrigger = target.closest("[data-close-panel]");
+            if (closeTrigger) {
+                panel.classList.remove("is-open");
+                panel.hidden = true;
+                return;
+            }
+        }
+
+        // Inline citation links are normal anchors to /ui/source/{para_id}.
+    });
+
+    restoreViewState();
+})();
+</script>
+{% endblock %}

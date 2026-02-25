@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Admin Cache{% endblock %}
+{% block content %}
+<section class="query-layout">
+    <header class="card masthead">
+        <p class="eyebrow">Admin / Cache</p>
+        <h1>Cache Statistics</h1>
+        <p class="subhead">Monitor L1-L5 cache utilization and invalidate where needed.</p>
+    </header>
+
+    <section class="card">
+        <h2>Current Stats</h2>
+        <table class="admin-table">
+            <tbody>
+                <tr><td>L1 ingestion entries</td><td>{{ stats.l1_ingestion_size }}</td></tr>
+                <tr><td>L2 ToC documents</td><td>{{ stats.l2_toc_size }}</td></tr>
+                <tr><td>L3 embeddings</td><td>{{ stats.l3_embeddings_size }}</td></tr>
+                <tr><td>L4 query cache</td><td>{{ stats.l4_query_size }}</td></tr>
+                <tr><td>L5 reasoning traces</td><td>{{ stats.l5_trace_size }}</td></tr>
+                <tr><td>L4 hit rate</td><td>{{ "%.2f"|format(stats.l4_hit_rate * 100) }}%</td></tr>
+            </tbody>
+        </table>
+        <button type="button" class="ghost" onclick="location.reload()">Refresh Live Stats</button>
+    </section>
+
+    <section class="card">
+        <h2>Cache Runtime Controls</h2>
+        <form id="cache-runtime-form" class="query-form">
+            <label>
+                <input type="checkbox" id="dry_run_cache_only" {% if runtime.dry_run_cache_only %}checked{% endif %}>
+                Enable cache-only dry-run mode (reject uncached queries)
+            </label>
+            <label for="query_cache_ttl_seconds">L4 Query Cache TTL (seconds)</label>
+            <input
+                id="query_cache_ttl_seconds"
+                name="query_cache_ttl_seconds"
+                type="number"
+                min="30"
+                max="604800"
+                value="{{ runtime.query_cache_ttl_seconds }}"
+            >
+            <div class="inline-actions">
+                <button type="button" onclick="saveCacheControls()">Save Cache Controls</button>
+                <span id="cache-runtime-status" class="feedback-status" aria-live="polite"></span>
+            </div>
+        </form>
+        <p class="subhead">Current mode: {% if runtime.dry_run_cache_only %}cache-only{% else %}normal{% endif %}</p>
+    </section>
+
+    <section class="card">
+        <h2>Invalidate</h2>
+        <form method="post" action="/api/admin/cache/invalidate" class="query-form" onsubmit="event.preventDefault(); submitInvalidate();">
+            <label for="cache_layer">Cache Layer</label>
+            <select id="cache_layer" name="cache_layer">
+                <option value="L2">L2</option>
+                <option value="L3">L3</option>
+                <option value="L4">L4</option>
+                <option value="L5">L5</option>
+            </select>
+            <button type="submit">Invalidate Layer</button>
+        </form>
+        <form class="query-form" onsubmit="event.preventDefault(); submitInvalidateDoc();">
+            <label for="doc_id">Document-specific invalidation</label>
+            <input id="doc_id" name="doc_id" type="text" placeholder="doc_id">
+            <button type="submit">Invalidate by doc_id</button>
+        </form>
+    </section>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function submitInvalidate() {
+    const layer = document.getElementById("cache_layer").value;
+    await fetch(`/api/admin/cache/invalidate?cache_layer=${encodeURIComponent(layer)}`, {method: "POST"});
+    location.reload();
+}
+
+async function submitInvalidateDoc() {
+    const docId = document.getElementById("doc_id").value.trim();
+    if (!docId) return;
+    await fetch(`/api/admin/cache/invalidate?doc_id=${encodeURIComponent(docId)}`, {method: "POST"});
+    location.reload();
+}
+
+async function saveCacheControls() {
+    const statusEl = document.getElementById("cache-runtime-status");
+    const dryRun = document.getElementById("dry_run_cache_only").checked;
+    const ttl = Number(document.getElementById("query_cache_ttl_seconds").value);
+
+    statusEl.textContent = "Saving...";
+
+    try {
+        const response = await fetch("/api/admin/config", {
+            method: "PUT",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                dry_run_cache_only: dryRun,
+                query_cache_ttl_seconds: ttl,
+            }),
+        });
+        if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.detail || "Failed to save cache controls");
+        }
+        statusEl.textContent = "Saved.";
+        setTimeout(() => location.reload(), 450);
+    } catch (error) {
+        statusEl.textContent = `Error: ${error.message}`;
+    }
+}
+</script>
+{% endblock %}

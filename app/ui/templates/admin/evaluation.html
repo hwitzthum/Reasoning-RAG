@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}Admin Evaluation{% endblock %}
+{% block content %}
+<section class="query-layout">
+    <header class="card masthead">
+        <p class="eyebrow">Admin / Evaluation</p>
+        <h1>Evaluation Runs</h1>
+        <p class="subhead">Track benchmark performance over time and compare runs side-by-side.</p>
+    </header>
+
+    <section class="card">
+        <h2>Run Selection</h2>
+        <form method="get" action="/admin/evaluation" class="query-form filters-grid">
+            <label for="run_a">Primary Run</label>
+            <select id="run_a" name="run_a">
+                {% for run in runs %}
+                <option value="{{ run.file_name }}" {% if selected_a and selected_a.file_name == run.file_name %}selected{% endif %}>
+                    {{ run.run_id or run.file_name }}
+                </option>
+                {% endfor %}
+            </select>
+            <label for="run_b">Comparison Run</label>
+            <select id="run_b" name="run_b">
+                <option value="">None</option>
+                {% for run in runs %}
+                <option value="{{ run.file_name }}" {% if selected_b and selected_b.file_name == run.file_name %}selected{% endif %}>
+                    {{ run.run_id or run.file_name }}
+                </option>
+                {% endfor %}
+            </select>
+            <button type="submit">Load Runs</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <h2>Trend Chart</h2>
+        {% if trend_points %}
+        <div id="eval-trend-shell" class="chart-shell" data-trend='{{ trend_points | tojson }}'>
+            <svg id="eval-trend-chart" class="chart-svg" viewBox="0 0 760 260" role="img" aria-label="Evaluation trend chart"></svg>
+        </div>
+        {% else %}
+        <p>No trend data yet.</p>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <h2>Primary Run Metrics</h2>
+        {% if selected_a %}
+        <table class="admin-table">
+            <tbody>
+                <tr><td>Run</td><td>{{ selected_a.run_id or selected_a.file_name }}</td></tr>
+                <tr><td>Total Questions</td><td>{{ selected_a.metrics.total_questions }}</td></tr>
+                <tr><td>Passed Questions</td><td>{{ selected_a.metrics.passed_questions }}</td></tr>
+                <tr><td>Accuracy</td><td>{{ "%.1f"|format((selected_a.metrics.accuracy or 0) * 100) }}%</td></tr>
+                <tr><td>Citation Accuracy</td><td>{{ "%.1f"|format((selected_a.metrics.citation_accuracy or 0) * 100) }}%</td></tr>
+                <tr><td>Avg Iterations</td><td>{{ selected_a.metrics.avg_iterations }}</td></tr>
+                <tr><td>Avg Latency</td><td>{{ selected_a.metrics.avg_latency_ms }} ms</td></tr>
+            </tbody>
+        </table>
+        {% else %}
+        <p>No run selected.</p>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <h2>Run Comparison</h2>
+        {% if selected_a and selected_b %}
+        <table class="admin-table">
+            <thead>
+                <tr>
+                    <th>Metric</th>
+                    <th>{{ selected_a.run_id or selected_a.file_name }}</th>
+                    <th>{{ selected_b.run_id or selected_b.file_name }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Accuracy</td>
+                    <td>{{ "%.1f"|format((selected_a.metrics.accuracy or 0) * 100) }}%</td>
+                    <td>{{ "%.1f"|format((selected_b.metrics.accuracy or 0) * 100) }}%</td>
+                </tr>
+                <tr>
+                    <td>Citation Accuracy</td>
+                    <td>{{ "%.1f"|format((selected_a.metrics.citation_accuracy or 0) * 100) }}%</td>
+                    <td>{{ "%.1f"|format((selected_b.metrics.citation_accuracy or 0) * 100) }}%</td>
+                </tr>
+                <tr>
+                    <td>Avg Iterations</td>
+                    <td>{{ selected_a.metrics.avg_iterations }}</td>
+                    <td>{{ selected_b.metrics.avg_iterations }}</td>
+                </tr>
+                <tr>
+                    <td>Avg Latency (ms)</td>
+                    <td>{{ selected_a.metrics.avg_latency_ms }}</td>
+                    <td>{{ selected_b.metrics.avg_latency_ms }}</td>
+                </tr>
+            </tbody>
+        </table>
+        {% else %}
+        <p>Select a comparison run to see side-by-side metrics.</p>
+        {% endif %}
+    </section>
+
+    <section class="card" id="question-drilldown">
+        <h2>Question Drill-Down</h2>
+        {% if selected_a and selected_a.results %}
+        <table class="admin-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Question</th>
+                    <th>Result</th>
+                    <th>Confidence</th>
+                    <th>Latency</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in selected_a.results %}
+                <tr {% if selected_question and selected_question.id == row.id %}class="is-active"{% endif %}>
+                    <td>
+                        <a href="/admin/evaluation?run_a={{ selected_a.file_name }}{% if selected_b %}&run_b={{ selected_b.file_name }}{% endif %}&question_id={{ row.id }}#question-drilldown">
+                            {{ row.id }}
+                        </a>
+                    </td>
+                    <td>{{ row.question }}</td>
+                    <td>{{ "pass" if row.passed else "fail" }}</td>
+                    <td>{{ row.confidence }}</td>
+                    <td>{{ row.latency_ms }} ms</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if selected_question %}
+        <article class="status-block">
+            <h3>{{ selected_question.id }} — {{ selected_question.question }}</h3>
+            <p><strong>Expected source:</strong> {{ selected_question.expected_source }}</p>
+            <p><strong>Expected keywords:</strong> {{ selected_question.expected_keywords | join(", ") }}</p>
+            <p><strong>Answer:</strong></p>
+            <pre class="answer-text">{{ selected_question.answer }}</pre>
+        </article>
+        {% endif %}
+        {% else %}
+        <p>No question-level results available for this run.</p>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function renderTrendChart() {
+    const shell = document.getElementById("eval-trend-shell");
+    const svg = document.getElementById("eval-trend-chart");
+    if (!shell || !svg) return;
+
+    const points = JSON.parse(shell.dataset.trend || "[]");
+    if (!Array.isArray(points) || points.length === 0) {
+        svg.innerHTML = "";
+        return;
+    }
+
+    const width = 760;
+    const height = 260;
+    const pad = {left: 48, right: 24, top: 20, bottom: 38};
+    const chartWidth = width - pad.left - pad.right;
+    const chartHeight = height - pad.top - pad.bottom;
+
+    const xFor = (index) => {
+        if (points.length === 1) return pad.left + chartWidth / 2;
+        return pad.left + (index / (points.length - 1)) * chartWidth;
+    };
+    const yFor = (value) => pad.top + (1 - value) * chartHeight;
+
+    const accuracyLine = points
+        .map((p, i) => `${xFor(i).toFixed(2)},${yFor(Number(p.accuracy || 0)).toFixed(2)}`)
+        .join(" ");
+    const citationLine = points
+        .map((p, i) => `${xFor(i).toFixed(2)},${yFor(Number(p.citation_accuracy || 0)).toFixed(2)}`)
+        .join(" ");
+
+    const grid = [0, 0.25, 0.5, 0.75, 1].map((v) => {
+        const y = yFor(v);
+        return `<line x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}" class="chart-axis" />`;
+    }).join("");
+
+    const dots = points.map((p, i) => {
+        const x = xFor(i);
+        const y = yFor(Number(p.accuracy || 0));
+        return `<circle class="chart-dot" cx="${x}" cy="${y}" r="4"><title>${p.label}: ${(Number(p.accuracy || 0) * 100).toFixed(1)}%</title></circle>`;
+    }).join("");
+
+    svg.innerHTML = `
+        ${grid}
+        <polyline class="chart-line" points="${accuracyLine}" />
+        <polyline class="chart-line-citation" points="${citationLine}" />
+        ${dots}
+        <text x="${pad.left}" y="${height - 12}" class="chart-label">Runs over time</text>
+        <text x="${pad.left}" y="16" class="chart-label">Accuracy (orange) vs Citation (teal)</text>
+    `;
+})();
+</script>
+{% endblock %}

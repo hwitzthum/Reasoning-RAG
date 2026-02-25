@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Source Passage{% endblock %}
+
+{% block content %}
+<section class="source-layout">
+    <article class="card source-card">
+        <p class="eyebrow">Source Passage</p>
+        <h1>{{ document.title if document else paragraph.doc_id }}</h1>
+        <p class="source-meta">
+            <strong>Paragraph:</strong> {{ paragraph.para_id }}
+            {% if paragraph.page_number %} | <strong>Page:</strong> {{ paragraph.page_number }}{% endif %}
+        </p>
+        <p class="source-meta">
+            <strong>Section:</strong>
+            {% if paragraph.section_path %}
+                {{ paragraph.section_path | join(" > ") }}
+            {% else %}
+                {{ paragraph.section_id }}
+            {% endif %}
+        </p>
+
+        <div class="source-context">
+            {% if context_before %}
+            <p class="source-context-label">Previous paragraph</p>
+            <blockquote>{{ context_before.text }}</blockquote>
+            {% endif %}
+
+            <p class="source-context-label">Cited paragraph</p>
+            <pre class="source-paragraph">{{ paragraph.text }}</pre>
+
+            {% if context_after %}
+            <p class="source-context-label">Next paragraph</p>
+            <blockquote>{{ context_after.text }}</blockquote>
+            {% endif %}
+        </div>
+
+        <div class="inline-actions">
+            <a
+                class="button-link"
+                href="/ui"
+                onclick="if (window.history.length > 1) { event.preventDefault(); window.history.back(); }"
+            >
+                Back to query
+            </a>
+            {% if open_original_url %}
+            <a class="button-link secondary" href="{{ open_original_url }}" target="_blank" rel="noreferrer noopener">
+                Open original document (best-effort jump)
+            </a>
+            {% endif %}
+        </div>
+    </article>
+</section>
+{% endblock %}

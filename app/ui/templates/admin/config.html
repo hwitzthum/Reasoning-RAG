@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Admin Config{% endblock %}
+{% block content %}
+<section class="query-layout">
+    <header class="card masthead">
+        <p class="eyebrow">Admin / Configuration</p>
+        <h1>Runtime Settings</h1>
+        <p class="subhead">Adjust runtime tunables and review restart requirements.</p>
+    </header>
+
+    <section class="card">
+        <h2>Current Settings</h2>
+        {% if message %}<p>{{ message }}</p>{% endif %}
+        <table class="admin-table">
+            <tbody>
+                <tr><td>max_reasoning_iterations</td><td>{{ config.max_reasoning_iterations }}</td><td>Restart: {{ config.restart_required.max_reasoning_iterations }}</td></tr>
+                <tr><td>query_timeout_seconds</td><td>{{ config.query_timeout_seconds }}</td><td>Restart: {{ config.restart_required.query_timeout_seconds }}</td></tr>
+                <tr><td>log_level</td><td>{{ config.log_level }}</td><td>Restart: {{ config.restart_required.log_level }}</td></tr>
+                <tr><td>dry_run_cache_only</td><td>{{ config.dry_run_cache_only }}</td><td>Restart: {{ config.restart_required.dry_run_cache_only }}</td></tr>
+                <tr><td>query_cache_ttl_seconds</td><td>{{ config.query_cache_ttl_seconds }}</td><td>Restart: {{ config.restart_required.query_cache_ttl_seconds }}</td></tr>
+                <tr><td>reasoning_model</td><td>{{ config.reasoning_model }}</td><td>Restart: {{ config.restart_required.reasoning_model }}</td></tr>
+                <tr><td>annotation_model</td><td>{{ config.annotation_model }}</td><td>Restart: {{ config.restart_required.annotation_model }}</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <section class="card">
+        <h2>Update</h2>
+        <form method="post" action="/admin/config" class="query-form">
+            <label for="max_reasoning_iterations">Max Iterations</label>
+            <input id="max_reasoning_iterations" name="max_reasoning_iterations" type="number" min="1" max="20" value="{{ config.max_reasoning_iterations }}">
+
+            <label for="query_timeout_seconds">Query Timeout (seconds)</label>
+            <input id="query_timeout_seconds" name="query_timeout_seconds" type="number" min="10" max="300" value="{{ config.query_timeout_seconds }}">
+
+            <label for="log_level">Log Level</label>
+            <select id="log_level" name="log_level">
+                <option value="DEBUG" {% if config.log_level == "DEBUG" %}selected{% endif %}>DEBUG</option>
+                <option value="INFO" {% if config.log_level == "INFO" %}selected{% endif %}>INFO</option>
+                <option value="WARNING" {% if config.log_level == "WARNING" %}selected{% endif %}>WARNING</option>
+                <option value="ERROR" {% if config.log_level == "ERROR" %}selected{% endif %}>ERROR</option>
+            </select>
+
+            <label>
+                <input type="hidden" name="dry_run_cache_only" value="false">
+                <input type="checkbox" name="dry_run_cache_only" value="true" {% if config.dry_run_cache_only %}checked{% endif %}>
+                Enable cache-only dry-run mode
+            </label>
+
+            <label for="query_cache_ttl_seconds">Query Cache TTL (seconds)</label>
+            <input id="query_cache_ttl_seconds" name="query_cache_ttl_seconds" type="number" min="30" max="604800" value="{{ config.query_cache_ttl_seconds }}">
+
+            <button type="submit">Save</button>
+        </form>
+        <p>Configuration updates are audited to <code>data/config_audit.log</code>.</p>
+    </section>
+</section>
+{% endblock %}

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Admin Trace{% endblock %}
+{% block content %}
+<section class="query-layout">
+    <header class="card masthead">
+        <p class="eyebrow">Admin / Trace</p>
+        <h1>Reasoning Trace</h1>
+        <p class="subhead">Query ID: {{ trace.query_id }}</p>
+    </header>
+
+    <section class="card">
+        <h2>Timeline View</h2>
+        <p>Latency: {{ trace.latency_ms }} ms | Iterations: {{ trace.iterations }}</p>
+        {% if timeline %}
+        <div class="trace-timeline">
+            {% for point in timeline %}
+            <div class="timeline-row">
+                <div class="timeline-label">#{{ point.index }} {{ point.label }}</div>
+                <div class="timeline-track">
+                    <span class="timeline-bar" style="width: {{ point.width_pct }}%"></span>
+                </div>
+                <div class="timeline-ms">{{ point.duration_ms }} ms</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p>No timeline data available.</p>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <h2>Conversation Trace</h2>
+        {% if trace_events %}
+        <ul class="trace-events">
+            {% for event in trace_events %}
+            <li class="trace-event trace-{{ event.role }}">
+                <header class="panel-heading">
+                    <strong>{{ event.type }}</strong>
+                    <span>#{{ event.index }}{% if event.iteration %} · iteration {{ event.iteration }}{% endif %}</span>
+                </header>
+                {% if event.collapsible %}
+                <details>
+                    <summary>Inspect payload</summary>
+                    <pre class="json-block">{{ event.payload }}</pre>
+                </details>
+                {% else %}
+                <pre class="json-block">{{ event.payload }}</pre>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p>No trace events captured.</p>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <h2>Final Answer</h2>
+        <div class="answer-text">{{ highlighted_answer }}</div>
+        <a href="/admin/queries">Back to query log</a>
+    </section>
+</section>
+{% endblock %}

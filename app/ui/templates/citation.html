@@ -1,0 +1,25 @@
+<article class="citation-detail">
+    <p class="eyebrow">Source Evidence</p>
+    <h3>{{ document.title if document else paragraph.doc_id }}</h3>
+    <p><strong>Paragraph ID:</strong> {{ paragraph.para_id }}</p>
+    <p>
+        <strong>Section:</strong>
+        {% if paragraph.section_path %}
+            {{ paragraph.section_path | join(" > ") }}
+        {% else %}
+            {{ paragraph.section_id }}
+        {% endif %}
+    </p>
+    <p><strong>Page:</strong> {{ paragraph.page_number if paragraph.page_number else "n/a" }}</p>
+    <pre>{{ paragraph.text }}</pre>
+    {% if original_url %}
+    <p>
+        <a href="{{ original_url }}{{ original_page_anchor }}" target="_blank" rel="noreferrer">
+            Open original document{% if paragraph.page_number and document and document.file_type == "pdf" %} (page {{ paragraph.page_number }}){% endif %}
+        </a>
+    </p>
+    {% endif %}
+    {% if document %}
+    <p><a href="/api/documents/{{ document.doc_id }}" target="_blank" rel="noreferrer">Open document metadata</a></p>
+    {% endif %}
+</article>

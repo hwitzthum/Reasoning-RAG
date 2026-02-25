@@ -1,0 +1,54 @@
+<section class="feedback-card">
+    <h3>Was this answer helpful?</h3>
+    <form id="feedback-form-{{ query_id }}" data-query-id="{{ query_id }}">
+        <div class="feedback-vote">
+            <label><input type="radio" name="rating" value="thumbs_up" required> Thumbs up</label>
+            <label><input type="radio" name="rating" value="thumbs_down" required> Thumbs down</label>
+        </div>
+        <label for="category-{{ query_id }}">Category</label>
+        <select id="category-{{ query_id }}" name="category">
+            <option value="">Select</option>
+            <option value="wrong_answer">Wrong answer</option>
+            <option value="incomplete">Incomplete</option>
+            <option value="bad_citation">Bad citation</option>
+            <option value="other">Other</option>
+        </select>
+        <label for="details-{{ query_id }}">Details (optional)</label>
+        <textarea id="details-{{ query_id }}" name="details" rows="2"></textarea>
+        <button type="submit">Submit feedback</button>
+        <p class="feedback-status" id="feedback-status-{{ query_id }}"></p>
+    </form>
+</section>
+
+<script>
+(() => {
+    const form = document.getElementById("feedback-form-{{ query_id }}");
+    if (!form || form.dataset.bound === "1") {
+        return;
+    }
+    form.dataset.bound = "1";
+    const statusNode = document.getElementById("feedback-status-{{ query_id }}");
+    const queryId = form.dataset.queryId;
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = {
+            rating: form.elements.rating.value,
+            category: form.elements.category.value || null,
+            details: form.elements.details.value || null,
+        };
+        const resp = await fetch(`/api/query/${encodeURIComponent(queryId)}/feedback`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload),
+        });
+
+        if (resp.ok) {
+            statusNode.textContent = "Feedback submitted.";
+            form.reset();
+        } else {
+            statusNode.textContent = "Unable to submit feedback.";
+        }
+    });
+})();
+</script>
