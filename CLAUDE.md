@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Reasoning-RAG is a reasoning-driven document QA system for Caritas Switzerland that replaces traditional vector-similarity retrieval with an iterative, structure-aware reasoning loop. The core insight: **don't search for similar text — reason about where to look.**
 
-**Status:** Pre-implementation (design phase complete). The architecture specification in `plan/plan.md` is comprehensive and ready for development.
+**Status:** Implemented (ingestion, orchestrator, FastAPI + htmx UI under `app/`); `plan/plan.md` remains the architecture specification.
 
 ## Architecture
 
-### Core Components (to be built)
+### Core Components
 
 1. **Ingestion Pipeline**: Docling converts PDF/DOCX/PPTX → Markdown with heading hierarchy preservation. Best-effort structure analysis (accept imperfect heading detection). Haiku annotation for variable-length summaries, language detection, and cross-reference extraction
 2. **Reasoning Orchestrator**: Single Claude Sonnet agent with 7 tools navigates document structure iteratively (max 8 iterations per query). Maintains evidence log and tracks visited sections
@@ -42,8 +42,8 @@ Reasoning-RAG is a reasoning-driven document QA system for Caritas Switzerland t
 
 - **Python 3.12** (configured in pyproject.toml)
 - **Document parsing**: Docling (unified PDF/DOCX/PPTX → Markdown)
-- **LLM reasoning**: Claude Sonnet 4.5 (via Anthropic SDK)
-- **LLM preprocessing**: Claude Haiku 4.5 (section summaries, annotations, language detection)
+- **LLM reasoning**: Claude Sonnet 4.6 (via Anthropic SDK; configured in `app/config.py`)
+- **LLM preprocessing**: Claude Haiku 4.5 (section summaries, annotations, language detection; configured in `app/config.py`)
 - **Backend**: FastAPI with SSE streaming
 - **Storage**: SQLite + filesystem
 - **Frontend**: Plain HTML + htmx (server-rendered with progressive enhancement)
@@ -56,13 +56,13 @@ Reasoning-RAG is a reasoning-driven document QA system for Caritas Switzerland t
 # Activate virtual environment
 source .venv/bin/activate
 
-# Install dependencies (once defined in pyproject.toml)
+# Install dependencies
 pip install -e .
 
-# Run FastAPI server (once implemented)
+# Run FastAPI server
 uvicorn app.main:app --reload
 
-# Run tests (once implemented)
+# Run tests
 pytest tests/
 ```
 
